@@ -1,0 +1,17 @@
+# Node
+node_modules/
+
+# Data & ML
+data/
+models/
+
+# Large files
+*.tar.xz
+*.run
+
+# Git
+.git
+
+# Optional
+.env
+*.log

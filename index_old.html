@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SignLex - Live ASL Detection</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0a0a0a;
+      color: #fff;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 2rem;
+    }
+
+    h1 {
+      font-size: 2rem;
+      margin-bottom: 1rem;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .container {
+      display: flex;
+      gap: 2rem;
+      align-items: flex-start;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    .video-container {
+      position: relative;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 20px 60px rgba(102, 126, 234, 0.3);
+    }
+
+    video, canvas {
+      display: block;
+      border-radius: 12px;
+    }
+
+    #canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+    }
+
+    .result-panel {
+      background: #141414;
+      border: 1px solid #333;
+      border-radius: 12px;
+      padding: 2rem;
+      min-width: 300px;
+      text-align: center;
+    }
+
+    .prediction {
+      font-size: 8rem;
+      font-weight: 700;
+      line-height: 1;
+      margin: 1rem 0;
+      color: #667eea;
+      text-shadow: 0 0 60px rgba(102, 126, 234, 0.5);
+      transition: all 0.2s ease;
+    }
+
+    .prediction.empty {
+      color: #333;
+      text-shadow: none;
+    }
+
+    .confidence {
+      font-size: 1.2rem;
+      color: #888;
+      margin-bottom: 1.5rem;
+    }
+
+    .confidence-bar {
+      width: 100%;
+      height: 8px;
+      background: #333;
+      border-radius: 4px;
+      overflow: hidden;
+      margin-bottom: 2rem;
+    }
+
+    .confidence-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #667eea, #764ba2);
+      border-radius: 4px;
+      transition: width 0.3s ease;
+    }
+
+    .status {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      font-size: 0.9rem;
+      color: #666;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #444;
+    }
+
+    .status-dot.active {
+      background: #4ade80;
+      box-shadow: 0 0 10px #4ade80;
+    }
+
+    .status-dot.detecting {
+      background: #667eea;
+      box-shadow: 0 0 10px #667eea;
+      animation: pulse 1s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    .instructions {
+      margin-top: 2rem;
+      padding: 1rem;
+      background: #1a1a1a;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      color: #888;
+      max-width: 600px;
+      text-align: center;
+    }
+
+    .error {
+      color: #ef4444;
+      background: rgba(239, 68, 68, 0.1);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      padding: 1rem;
+      border-radius: 8px;
+      margin-top: 1rem;
+    }
+
+    .loading {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 1rem;
+      padding: 3rem;
+    }
+
+    .spinner {
+      width: 40px;
+      height: 40px;
+      border: 3px solid #333;
+      border-top-color: #667eea;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .stability-indicator {
+      font-size: 0.8rem;
+      color: #666;
+      margin-top: 0.5rem;
+    }
+
+    .stability-indicator.stable {
+      color: #4ade80;
+    }
+  </style>
+</head>
+<body>
+  <h1>SignLex ASL Detection</h1>
+
+  <div id="loading" class="loading">
+    <div class="spinner"></div>
+    <p>Loading model and camera...</p>
+  </div>
+
+  <div id="app" class="container" style="display: none;">
+    <div class="video-container">
+      <video id="video" width="640" height="480" autoplay playsinline></video>
+      <canvas id="canvas" width="640" height="480"></canvas>
+    </div>
+
+    <div class="result-panel">
+      <p style="color: #666; font-size: 0.9rem;">Detected Letter</p>
+      <div id="prediction" class="prediction empty">?</div>
+      <p id="confidence" class="confidence">Confidence: 0%</p>
+      <div class="confidence-bar">
+        <div id="confidence-fill" class="confidence-fill" style="width: 0%"></div>
+      </div>
+      <div class="status">
+        <div id="status-dot" class="status-dot"></div>
+        <span id="status-text">Initializing...</span>
+      </div>
+      <p id="stability" class="stability-indicator">Waiting for stable detection...</p>
+    </div>
+  </div>
+
+  <div class="instructions">
+    <strong>How to use:</strong> Position your hand in front of the camera and make ASL alphabet signs.
+    The model will detect the letter you're signing in real-time.
+    <br><br>
+    <strong>Tip:</strong> Hold your hand steady for best results. The detector waits for stable predictions.
+    <br><br>
+    <strong>Note:</strong> J and Z require motion and may not be accurately detected.
+  </div>
+
+  <div id="error" class="error" style="display: none;"></div>
+
+  <!-- MediaPipe Hands -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+
+  <!-- TensorFlow.js -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0"></script>
+
+  <script>
+    // ==================== CONFIG ====================
+    const CONFIG = {
+      SMOOTHING_FRAMES: 8,        // Number of frames to average over
+      MIN_CONFIDENCE: 0.65,       // Minimum confidence threshold
+      STABILITY_THRESHOLD: 6,    // How many frames must agree to show prediction
+      PREDICT_INTERVAL: 100,      // Milliseconds between predictions (10 fps)
+      DISPLAY_HOLD_TIME: 500,     // How long to hold display after hand disappears
+    };
+
+    // ASL Labels (matching training)
+    const LABELS = [
+      'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J',
+      'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T',
+      'U', 'V', 'W', 'X', 'Y', 'Z'
+    ];
+
+    // DOM elements
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const predictionEl = document.getElementById('prediction');
+    const confidenceEl = document.getElementById('confidence');
+    const confidenceFill = document.getElementById('confidence-fill');
+    const statusDot = document.getElementById('status-dot');
+    const statusText = document.getElementById('status-text');
+    const loadingEl = document.getElementById('loading');
+    const appEl = document.getElementById('app');
+    const errorEl = document.getElementById('error');
+    const stabilityEl = document.getElementById('stability');
+
+    // Processing canvas for cropping hand region
+    const processCanvas = document.createElement('canvas');
+    processCanvas.width = 28;
+    processCanvas.height = 28;
+    const processCtx = processCanvas.getContext('2d');
+
+    // State
+    let model = null;
+    let isProcessing = false;
+    let lastPredictTime = 0;
+    let predictionHistory = [];
+    let confidenceHistory = [];
+    let lastDisplayedLetter = null;
+    let lastHandSeenTime = 0;
+    let currentStableLetter = null;
+
+    // Show error message
+    function showError(message) {
+      errorEl.textContent = message;
+      errorEl.style.display = 'block';
+      loadingEl.style.display = 'none';
+    }
+
+    // Update status indicator
+    function setStatus(status, text) {
+      statusDot.className = 'status-dot';
+      if (status === 'active') statusDot.classList.add('active');
+      if (status === 'detecting') statusDot.classList.add('detecting');
+      statusText.textContent = text;
+    }
+
+    // Get most frequent item in array
+    function getMostFrequent(arr) {
+      if (arr.length === 0) return null;
+      const counts = {};
+      let maxCount = 0;
+      let maxItem = arr[0];
+      
+      for (const item of arr) {
+        counts[item] = (counts[item] || 0) + 1;
+        if (counts[item] > maxCount) {
+          maxCount = counts[item];
+          maxItem = item;
+        }
+      }
+      
+      return { item: maxItem, count: maxCount, total: arr.length };
+    }
+
+    // Get average of array
+    function getAverage(arr) {
+      if (arr.length === 0) return 0;
+      return arr.reduce((a, b) => a + b, 0) / arr.length;
+    }
+
+    // Update display with smoothed prediction
+    function updateDisplay(letter, confidence, isStable) {
+      if (letter && isStable) {
+        predictionEl.textContent = letter;
+        predictionEl.classList.remove('empty');
+        confidenceEl.textContent = `Confidence: ${(confidence * 100).toFixed(1)}%`;
+        confidenceFill.style.width = `${confidence * 100}%`;
+        stabilityEl.textContent = 'Stable detection ✓';
+        stabilityEl.classList.add('stable');
+        currentStableLetter = letter;
+      } else if (letter && !isStable) {
+        // Show detecting state but keep last stable letter if recent
+        if (currentStableLetter && Date.now() - lastHandSeenTime < CONFIG.DISPLAY_HOLD_TIME) {
+          predictionEl.textContent = currentStableLetter;
+          predictionEl.classList.remove('empty');
+        } else {
+          predictionEl.textContent = '...';
+          predictionEl.classList.add('empty');
+        }
+        confidenceEl.textContent = `Detecting: ${letter}`;
+        confidenceFill.style.width = `${confidence * 50}%`;
+        stabilityEl.textContent = `Stabilizing... (${predictionHistory.length}/${CONFIG.STABILITY_THRESHOLD})`;
+        stabilityEl.classList.remove('stable');
+      } else {
+        // No detection - hold last result briefly
+        if (currentStableLetter && Date.now() - lastHandSeenTime < CONFIG.DISPLAY_HOLD_TIME) {
+          // Keep showing last stable letter for a moment
+        } else {
+          predictionEl.textContent = '?';
+          predictionEl.classList.add('empty');
+          confidenceEl.textContent = 'Confidence: 0%';
+          confidenceFill.style.width = '0%';
+          stabilityEl.textContent = 'Show your hand...';
+          stabilityEl.classList.remove('stable');
+          currentStableLetter = null;
+        }
+      }
+    }
+
+    // Get bounding box from landmarks with padding
+    function getBoundingBox(landmarks, width, height, padding = 0.25) {
+      let minX = Infinity, minY = Infinity;
+      let maxX = -Infinity, maxY = -Infinity;
+
+      for (const lm of landmarks) {
+        minX = Math.min(minX, lm.x);
+        minY = Math.min(minY, lm.y);
+        maxX = Math.max(maxX, lm.x);
+        maxY = Math.max(maxY, lm.y);
+      }
+
+      // Convert to pixel coordinates
+      minX *= width;
+      maxX *= width;
+      minY *= height;
+      maxY *= height;
+
+      // Add padding
+      const w = maxX - minX;
+      const h = maxY - minY;
+      const padX = w * padding;
+      const padY = h * padding;
+
+      // Make it square (use larger dimension)
+      const size = Math.max(w + padX * 2, h + padY * 2);
+      const centerX = (minX + maxX) / 2;
+      const centerY = (minY + maxY) / 2;
+
+      return {
+        x: Math.max(0, centerX - size / 2),
+        y: Math.max(0, centerY - size / 2),
+        width: Math.min(size, width),
+        height: Math.min(size, height)
+      };
+    }
+
+    // Crop hand region and convert to 28x28 grayscale
+    function preprocessHandRegion(videoEl, bbox) {
+      // Draw cropped region to processing canvas
+      processCtx.drawImage(
+        videoEl,
+        bbox.x, bbox.y, bbox.width, bbox.height,
+        0, 0, 28, 28
+      );
+
+      // Get pixel data
+      const imageData = processCtx.getImageData(0, 0, 28, 28);
+      const pixels = imageData.data;
+
+      // Convert to grayscale and normalize
+      const grayscale = new Float32Array(784);
+      for (let i = 0; i < 784; i++) {
+        const idx = i * 4;
+        // Grayscale conversion: 0.299*R + 0.587*G + 0.114*B
+        const gray = (pixels[idx] * 0.299 + pixels[idx + 1] * 0.587 + pixels[idx + 2] * 0.114) / 255.0;
+        grayscale[i] = gray;
+      }
+
+      return grayscale;
+    }
+
+    // Run inference
+    async function predict(pixels) {
+      if (!model || isProcessing) return null;
+
+      isProcessing = true;
+
+      try {
+        const inputTensor = tf.tensor2d([Array.from(pixels)], [1, 784]);
+        const prediction = model.predict(inputTensor);
+        const probabilities = await prediction.data();
+
+        inputTensor.dispose();
+        prediction.dispose();
+
+        // Find max probability
+        let maxIdx = 0;
+        let maxProb = probabilities[0];
+        for (let i = 1; i < probabilities.length; i++) {
+          if (probabilities[i] > maxProb) {
+            maxProb = probabilities[i];
+            maxIdx = i;
+          }
+        }
+
+        return {
+          letter: LABELS[maxIdx],
+          confidence: maxProb
+        };
+      } catch (err) {
+        console.error('Prediction error:', err);
+        return null;
+      } finally {
+        isProcessing = false;
+      }
+    }
+
+    // MediaPipe results handler
+    function onResults(results) {
+      // Clear canvas
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
+        // No hand detected
+        setStatus('active', 'Show your hand');
+        updateDisplay(null, 0, false);
+        
+        // Clear history after a delay
+        if (Date.now() - lastHandSeenTime > CONFIG.DISPLAY_HOLD_TIME * 2) {
+          predictionHistory = [];
+          confidenceHistory = [];
+        }
+        return;
+      }
+
+      lastHandSeenTime = Date.now();
+      setStatus('detecting', 'Detecting...');
+
+      const landmarks = results.multiHandLandmarks[0];
+
+      // Draw hand landmarks
+      drawConnectors(ctx, landmarks, HAND_CONNECTIONS, { color: '#667eea', lineWidth: 2 });
+      drawLandmarks(ctx, landmarks, { color: '#764ba2', lineWidth: 1, radius: 3 });
+
+      // Get bounding box
+      const bbox = getBoundingBox(landmarks, video.videoWidth, video.videoHeight);
+
+      // Draw bounding box
+      ctx.strokeStyle = '#4ade80';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(bbox.x, bbox.y, bbox.width, bbox.height);
+
+      // Throttle predictions
+      const now = Date.now();
+      if (now - lastPredictTime < CONFIG.PREDICT_INTERVAL) {
+        return;
+      }
+      lastPredictTime = now;
+
+      // Preprocess and predict
+      const pixels = preprocessHandRegion(video, bbox);
+
+      predict(pixels).then(result => {
+        if (!result) return;
+
+        if (result.confidence > CONFIG.MIN_CONFIDENCE) {
+          // Add to history
+          predictionHistory.push(result.letter);
+          confidenceHistory.push(result.confidence);
+          
+          // Keep history limited
+          if (predictionHistory.length > CONFIG.SMOOTHING_FRAMES) {
+            predictionHistory.shift();
+            confidenceHistory.shift();
+          }
+
+          // Get most frequent prediction
+          const frequent = getMostFrequent(predictionHistory);
+          const avgConfidence = getAverage(confidenceHistory);
+          
+          // Check if prediction is stable enough
+          const isStable = frequent.count >= CONFIG.STABILITY_THRESHOLD;
+          
+          updateDisplay(frequent.item, avgConfidence, isStable);
+          
+        } else {
+          // Low confidence - don't add to history, just show current state
+          const frequent = getMostFrequent(predictionHistory);
+          if (frequent) {
+            const avgConfidence = getAverage(confidenceHistory);
+            const isStable = frequent.count >= CONFIG.STABILITY_THRESHOLD;
+            updateDisplay(frequent.item, avgConfidence, isStable);
+          } else {
+            updateDisplay(null, 0, false);
+          }
+        }
+      });
+    }
+
+    // Initialize everything
+    async function init() {
+      try {
+        // Load TensorFlow.js model
+        console.log('Loading model...');
+        
+        // Update this path to your model location
+        model = await tf.loadLayersModel('./models/saved/gesture_model/model.json');
+        console.log('Model loaded successfully');
+
+        // Initialize MediaPipe Hands
+        console.log('Initializing MediaPipe...');
+        const hands = new Hands({
+          locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+        });
+
+        hands.setOptions({
+          maxNumHands: 1,
+          modelComplexity: 1,
+          minDetectionConfidence: 0.7,
+          minTrackingConfidence: 0.5
+        });
+
+        hands.onResults(onResults);
+
+        // Start camera
+        console.log('Starting camera...');
+        const camera = new Camera(video, {
+          onFrame: async () => {
+            await hands.send({ image: video });
+          },
+          width: 640,
+          height: 480
+        });
+
+        await camera.start();
+
+        // Show app, hide loading
+        loadingEl.style.display = 'none';
+        appEl.style.display = 'flex';
+        setStatus('active', 'Ready - show your hand');
+
+        console.log('SignLex ready!');
+
+      } catch (err) {
+        console.error('Initialization error:', err);
+        showError(`Failed to initialize: ${err.message}`);
+      }
+    }
+
+    // Start the app
+    init();
+  </script>
+</body>
+</html>
