@@ -2,8 +2,10 @@
 node_modules/
 
 # Data & ML
-data/
-models/
+data/processed
+data/raw
+models/saved
+models/logs
 
 # Large files
 *.tar.xz
